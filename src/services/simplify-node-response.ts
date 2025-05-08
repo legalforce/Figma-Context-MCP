@@ -10,6 +10,7 @@ import { hasValue, isRectangleCornerRadii, isTruthy } from "~/utils/identity.js"
 import { removeEmptyKeys, generateVarId, StyleId, parsePaint, isVisible } from "~/utils/common.js";
 import { buildSimplifiedStrokes, SimplifiedStroke } from "~/transformers/style.js";
 import { buildSimplifiedEffects, SimplifiedEffects } from "~/transformers/effects.js";
+import { Component, ComponentSet, ComponentProperty } from "@figma/rest-api-spec";
 /**
  * TODO ITEMS
  *
@@ -47,6 +48,8 @@ type StyleTypes =
   | string;
 type GlobalVars = {
   styles: Record<StyleId, StyleTypes>;
+  components: Record<string, Component>;
+  componentSets: Record<string, ComponentSet>;
 };
 export interface SimplifiedDesign {
   name: string;
@@ -76,6 +79,11 @@ export interface SimplifiedNode {
   layout?: string;
   // backgroundColor?: ColorValue; // Deprecated by Figma API
   // for rect-specific strokes, etc.
+
+  // Aegis specific
+  aegisComponent?: string;
+  aegisComponentProperties?: Record<string, string>;
+
   // children
   children?: SimplifiedNode[];
 }
@@ -115,14 +123,20 @@ export interface ColorValue {
 export function parseFigmaResponse(data: GetFileResponse | GetFileNodesResponse): SimplifiedDesign {
   const { name, lastModified, thumbnailUrl } = data;
   let nodes: FigmaDocumentNode[];
+  let globalVars: GlobalVars = {
+    styles: {},
+    components: {},
+    componentSets: {},
+  };
   if ("document" in data) {
     nodes = Object.values(data.document.children);
   } else {
-    nodes = Object.values(data.nodes).map((n) => n.document);
+    nodes = Object.values(data.nodes).map((n) => {
+      globalVars.components = { ...globalVars.components, ...(n.components ?? {}) };
+      globalVars.componentSets = { ...globalVars.componentSets, ...(n.componentSets ?? {}) };
+      return n.document;
+    });
   }
-  let globalVars: GlobalVars = {
-    styles: {},
-  };
   const simplifiedNodes: SimplifiedNode[] = nodes
     .filter(isVisible)
     .map((n) => parseNode(globalVars, n))
@@ -191,6 +205,27 @@ function parseNode(
     name,
     type,
   };
+
+  // aegis component
+  if (hasValue("componentId", n)) {
+    const component = globalVars.components[n.componentId];
+    const componentSet = component?.componentSetId ? globalVars.componentSets[component.componentSetId] : null;
+    
+    if (componentSet?.description) {
+      const matches = componentSet.description.match(/.*\[React component name: ?(.+)\].*/i);
+      simplified.aegisComponent = matches?.[1];
+    }
+  }
+
+  if (hasValue("componentProperties", n)) {
+    simplified.aegisComponentProperties = Object.entries(n.componentProperties as Record<string, ComponentProperty>)
+      .reduce((acc, [key, prop]) => ({
+        ...acc,
+        [key.split("#")[0]]: prop.value,
+      }),
+      {},
+    );
+  }
 
   // text
   if (hasValue("style", n) && Object.keys(n.style).length) {
