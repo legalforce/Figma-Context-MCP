@@ -10,7 +10,7 @@ import { hasValue, isRectangleCornerRadii, isTruthy } from "~/utils/identity.js"
 import { removeEmptyKeys, generateVarId, StyleId, parsePaint, isVisible } from "~/utils/common.js";
 import { buildSimplifiedStrokes, SimplifiedStroke } from "~/transformers/style.js";
 import { buildSimplifiedEffects, SimplifiedEffects } from "~/transformers/effects.js";
-import { Component, ComponentSet } from "@figma/rest-api-spec";
+import { Component, ComponentSet, ComponentProperty } from "@figma/rest-api-spec";
 /**
  * TODO ITEMS
  *
@@ -82,6 +82,7 @@ export interface SimplifiedNode {
 
   // Aegis specific
   aegisComponent?: string;
+  aegisComponentProperties?: Record<string, string>;
 
   // children
   children?: SimplifiedNode[];
@@ -214,6 +215,16 @@ function parseNode(
       const matches = componentSet.description.match(/.*\[React component name: ?(.+)\].*/i);
       simplified.aegisComponent = matches?.[1];
     }
+  }
+
+  if (hasValue("componentProperties", n)) {
+    simplified.aegisComponentProperties = Object.entries(n.componentProperties as Record<string, ComponentProperty>)
+      .reduce((acc, [key, prop]) => ({
+        ...acc,
+        [key.split("#")[0]]: prop.value,
+      }),
+      {},
+    );
   }
 
   // text
